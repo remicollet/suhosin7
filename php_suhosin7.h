@@ -71,6 +71,9 @@ extern zend_module_entry suhosin7_module_entry;
 // PHP_MINFO_FUNCTION(suhosin);
 
 #include "ext/standard/basic_functions.h"
+#ifdef HAVE_PHP_SESSION
+#include "ext/session/php_session.h"
+#endif
 
 static inline int suhosin_is_protected_varname(char *var, int var_len)
 {
@@ -202,22 +205,31 @@ ZEND_BEGIN_MODULE_GLOBALS(suhosin7)
 	zend_bool  disallow_post_ws;
 	
 /*	fileupload */
-	// zend_long  upload_limit;
-	// zend_long  upload_max_newlines;
-	// zend_long  num_uploads;
-	// zend_bool  upload_disallow_elf;
-	// zend_bool  upload_disallow_binary;
-	// zend_bool  upload_remove_binary;
+	zend_long  upload_max_newlines;
+	zend_long  upload_limit;
+	zend_long  num_uploads;
+	zend_bool  upload_disallow_elf;
+	zend_bool  upload_disallow_binary;
+	zend_bool  upload_remove_binary;
 #ifdef SUHOSIN7_EXPERIMENTAL
-	// zend_bool  upload_allow_utf8;
+	zend_bool  upload_allow_utf8;
 #endif
-	// char *upload_verification_script;
+	char *upload_verification_script;
 
 	zend_bool  no_more_variables;
 	zend_bool  no_more_get_variables;
 	zend_bool  no_more_post_variables;
 	zend_bool  no_more_cookie_variables;
 	zend_bool  no_more_uploads;
+
+	/*	session */
+#ifdef HAVE_PHP_SESSION
+	void *s_module;
+	void *s_original_mod;
+	int (*old_s_read)(PS_READ_ARGS);
+	int (*old_s_write)(PS_WRITE_ARGS);
+	int (*old_s_destroy)(PS_DESTROY_ARGS);
+#endif
 
 	/* encryption */
 	BYTE fi[24],ri[24];
@@ -377,9 +389,18 @@ void suhosin_hook_header_handler();
 void suhosin_unhook_header_handler();
 void suhosin_hook_execute();
 // void suhosin_hook_sha256();
+void suhosin_hook_ex_imp();
+
+#ifdef HAVE_PHP_SESSION
+void suhosin_hook_session();
+#endif
+
+void suhosin_hook_post_handlers();
 
 // ifilter.c
 void suhosin_normalize_varname(char *varname);
+size_t suhosin_strnspn(const char *input, size_t n, const char *accept);
+size_t suhosin_strncspn(const char *input, size_t n, const char *reject);
 
 // cookiecrypt.c
 char *suhosin_cookie_decryptor(char *raw_cookie);
@@ -390,12 +411,14 @@ char *suhosin_decrypt_single_cookie(char *name, int name_len, char *value, int v
 zend_string *suhosin_encrypt_string(char *str, int len, char *var, int vlen, char *key);
 zend_string *suhosin_decrypt_string(char *str, int padded_len, char *var, int vlen, char *key, int check_ra);
 char *suhosin_generate_key(char *key, zend_bool ua, zend_bool dr, long raddr, char *cryptkey);
+#define S7_GENERATE_KEY(type, keyvar) suhosin_generate_key(SUHOSIN7_G(type ## _cryptkey), SUHOSIN7_G(type ## _cryptua), SUHOSIN7_G(type ## _cryptdocroot), SUHOSIN7_G(type ## _cryptraddr), (char *)keyvar);
 
 // aes.c
 void suhosin_aes_gentables();
 void suhosin_aes_gkey(int nb,int nk,char *key);
 void suhosin_aes_encrypt(char *buff);
 void suhosin_aes_decrypt(char *buff);
+
 
 //
 
@@ -415,7 +438,7 @@ static inline char *suhosin_get_active_function_name() {
 }
 
 #ifdef SUHOSIN_STRCASESTR
-char *suhosin_strcasestr(char *haystack, char *needle)
+char *suhosin_strcasestr(char *haystack, char *needle);
 #else
 #define suhosin_strcasestr(a, b) strcasestr(a, b)
 #endif
